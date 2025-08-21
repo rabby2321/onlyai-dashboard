@@ -8,7 +8,7 @@ export default function WalletClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // ----- state (keep the old look: typed dollars + preset chips)
+  // Keep old look: typed dollars + preset chips
   const [dollars, setDollars] = useState<string>("100"); // default $100 like your old UI
   const [loading, setLoading] = useState<"stripe" | "nowp" | null>(null);
 
@@ -19,7 +19,7 @@ export default function WalletClient() {
     return Math.max(0, Math.floor(n)) * 100;
   }, [dollars]);
 
-  // ----- handle Stripe/NOWP return (?ok=1[&provider=stripe&session_id=...])
+  // Handle Stripe/NOWP return (?ok=1[&provider=stripe&session_id=...])
   const confirmedRef = useRef(false);
   const ok = sp.get("ok");
   const provider = sp.get("provider");
@@ -29,24 +29,32 @@ export default function WalletClient() {
     // If we came back from Stripe with a session_id, confirm once, then clean URL
     if (ok === "1" && provider === "stripe" && sessionId && !confirmedRef.current) {
       confirmedRef.current = true;
-      fetch("/api/stripe/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId }),
-      })
-        .catch(() => null)
-        .finally(() => router.replace("/wallet"));
+      (async () => {
+        try {
+          await fetch("/api/stripe/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId }),
+          });
+        } catch {
+          // no-op; webhook retry will backstop this if needed
+        } finally {
+          router.replace("/wallet");
+          router.refresh();
+        }
+      })();
       return;
     }
 
-    // If it's a NOWPayments success (or anything else), just clean the URL
+    // If it's a NOWPayments success (or Stripe without session id), just clean the URL
     if (ok === "1" && !confirmedRef.current) {
       confirmedRef.current = true;
       router.replace("/wallet");
+      router.refresh();
     }
   }, [ok, provider, sessionId, router]);
 
-  // ----- actions
+  // Actions
   async function payStripe() {
     if (amountC < 500 || amountC > 100000) {
       alert("Enter $5–$1000 (whole dollars).");
@@ -87,7 +95,7 @@ export default function WalletClient() {
     }
   }
 
-  // preset chips (old layout had 25/50/100/200)
+  // Preset chips (old layout had 25/50/100/200)
   const presets = [25, 50, 100, 200];
 
   return (
