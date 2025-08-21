@@ -1,84 +1,84 @@
-// app/api/stripe/webhook/route.ts
 import Stripe from "stripe";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
-export const runtime = "nodejs";
+export const runtime = "nodejs";         // IMPORTANT: Node runtime
+export const dynamic = "force-dynamic";  // don’t cache
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2025-07-30.basil",
+});
+
+// set to true temporarily if you need to verify what’s present in prod logs
+const DEBUG = false;
 
 async function creditOnce(userId: string, amountC: number, ref: string, meta: any) {
-  if (!userId || !amountC || !ref) {
-    console.log("[stripe] SKIP creditOnce missing", { userId, amountC, ref });
-    return;
-  }
+  if (!userId || !amountC || !ref) return;
   const existing = await prisma.txn.findFirst({ where: { ref } });
-  if (existing) {
-    console.log("[stripe] DUPLICATE ref, skipping", ref);
-    return;
-  }
+  if (existing) return;
+
   await prisma.$transaction(async (tx) => {
     await tx.wallet.upsert({
-      // Wallet.userId must be UNIQUE or ID for upsert to work
       where: { userId },
       create: { userId, balanceC: amountC },
-      update: { balanceC: { increment: amountC } }
+      update: { balanceC: { increment: amountC } },
     });
     await tx.txn.create({ data: { userId, type: "CREDIT", amountC, ref, meta } });
   });
-  console.log("[stripe] CREDIT OK", { userId, amountC, ref });
 }
 
 export async function POST(req: Request) {
-  const sig = req.headers.get("stripe-signature")!;
-  const raw = await req.text();
+  const hdrs = await headers();
+  const sig = hdrs.get("stripe-signature") ?? "";
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (DEBUG) {
+    console.log("[stripe] sig present?", Boolean(sig));
+    console.log("[stripe] secret present?", Boolean(secret));
+  }
+  if (!secret) return new Response("Missing STRIPE_WEBHOOK_SECRET", { status: 500 });
+
+  // Use Buffer – safest for Stripe signature check
+  const raw = Buffer.from(await req.arrayBuffer());
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(raw, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch (e: any) {
-    console.error("[stripe] Bad signature:", e.message);
-    return new Response("Bad signature", { status: 400 });
+    event = stripe.webhooks.constructEvent(raw, sig, secret);
+  } catch (err: any) {
+    console.error("[stripe] bad signature:", err?.message);
+    return new Response("Signature verification failed", { status: 400 });
   }
+
+  if (DEBUG) console.log("[stripe] event type:", event.type);
 
   try {
     switch (event.type) {
+      // Checkout completes first
       case "checkout.session.completed": {
-        const s = event.data.object as Stripe.Checkout.Session;
-        const sess = await stripe.checkout.sessions.retrieve(s.id);
-        const ref = String(sess.payment_intent || sess.id);
-        let userId = (sess.metadata?.userId as string) || "";
-        let amountC = (sess.amount_total ?? 0) as number;
-
-        if ((!userId || !amountC) && sess.payment_intent) {
-          const pi = await stripe.paymentIntents.retrieve(String(sess.payment_intent));
-          userId = (pi.metadata?.userId as string) || userId;
-          amountC = (pi.amount_received ?? pi.amount ?? amountC) as number;
-        }
-
-        console.log("[stripe] event checkout.session.completed", { userId, amountC, ref });
-        if (sess.payment_status === "paid") {
-          await creditOnce(userId, amountC, ref, sess);
-        } else {
-          console.log("[stripe] session not paid, skipping credit");
-        }
+        const cs = event.data.object as Stripe.Checkout.Session;
+        const userId = (cs.metadata?.userId as string) || "";
+        const amountC = Number(cs.amount_total ?? 0);
+        const ref = `cs_${cs.id}`;
+        await creditOnce(userId, amountC, ref, cs);
         break;
       }
 
+      // PaymentIntent succeeded is a good backup
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
         const userId = (pi.metadata?.userId as string) || "";
-        const amountC = (pi.amount_received ?? pi.amount ?? 0) as number;
-        const ref = String(pi.id);
-        console.log("[stripe] event payment_intent.succeeded", { userId, amountC, ref });
+        const amountC = Number(pi.amount_received ?? pi.amount ?? 0);
+        const ref = `pi_${pi.id}`;
         await creditOnce(userId, amountC, ref, pi);
         break;
       }
 
       default:
+        // ignore other event types quietly
         break;
     }
   } catch (e) {
-    console.error("[stripe] handler error:", e);
+    console.error("[stripe] webhook handler error:", e);
     return new Response("handler error", { status: 500 });
   }
 
