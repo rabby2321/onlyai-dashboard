@@ -1,0 +1,101 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String?
+  hash        String?
+  role        Role         @default(USER)
+  wallet      Wallet?
+  allocations Allocation[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  Txn         Txn[]
+
+  // NEW:
+  telegram    String?
+  address     String?
+}
+
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  balanceC  Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model Txn {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      TxnType
+  amountC   Int
+  ref       String?
+  meta      Json?
+  createdAt DateTime @default(now())
+}
+
+model Plan {
+  id         String       @id @default(cuid())
+  name       String
+  priceC     Int
+  durationD  Int
+  createdAt  DateTime     @default(now())
+  Allocation Allocation[]
+}
+
+model Allocation {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  endpointId String
+  endpoint   Endpoint @relation(fields: [endpointId], references: [id])
+  planId     String
+  plan       Plan     @relation(fields: [planId], references: [id])
+  startsAt   DateTime @default(now())
+  endsAt     DateTime
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+enum TxnType {
+  CREDIT
+  DEBIT
+}
+
+enum EpStatus {
+  FREE
+  ASSIGNED
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Endpoint {
+  id             String   @id @default(cuid())
+  host           String
+  port           Int
+  protocol       String
+  authUser       String
+  authPass       String
+  status         EpStatus @default(FREE)
+  controllerPath String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  Allocation     Allocation[]
+
+  @@unique([host, port])  // <— add this
+}

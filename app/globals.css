@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* optional: nicer defaults */
+* { scrollbar-width: thin; }
+html, body { height: 100%; }
+
+/* Subtle background grid */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+  pointer-events: none;
+}
+
