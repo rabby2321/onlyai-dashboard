@@ -36,7 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="grid min-h-screen grid-cols-[260px_1fr]">
           <aside className="border-r border-zinc-800/60 bg-zinc-950/60 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/40">
             <div className="flex items-center gap-3 px-4 py-5">
-              <Link href="/" className="group flex items-center gap-3">
+              <Link href="/shop" prefetch={false} className="group flex items-center gap-3">
                 <Image
                   src="/onlyai-logo.jpg"
                   alt="OnlyAI Proxies logo"
