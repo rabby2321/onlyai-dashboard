@@ -1,7 +1,8 @@
 // components/proxy/ProxyCard.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Clock, Copy, ShieldCheck, RotateCw, CheckCircle2, AlertTriangle } from "lucide-react";
 
 type Props = {
@@ -36,15 +37,8 @@ export default function ProxyCard({
   const [rotating, setRotating] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // remove any "(xx days)" suffix if it exists in DB
-  const cleanName = planName.replace(/\s*\(\s*\d+\s*days?\s*\)\s*$/i, "").trim();
-
-  const socks = `socks5://${encodeURIComponent(username)}:${encodeURIComponent(
-    password
-  )}@${host}:${port}`;
-  const http = `http://${encodeURIComponent(username)}:${encodeURIComponent(
-    password
-  )}@${host}:${port}`;
+  const socks = `socks5://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
+  const http  = `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
 
   async function copy(text: string, which: "socks" | "http") {
     try {
@@ -61,7 +55,7 @@ export default function ProxyCard({
   // auto-dismiss toast
   useEffect(() => {
     if (!feedback) return;
-    const t = setTimeout(() => setFeedback(null), 1800);
+    const t = setTimeout(() => setFeedback(null), 2000);
     return () => clearTimeout(t);
   }, [feedback]);
 
@@ -167,8 +161,10 @@ export default function ProxyCard({
         </div>
       </div>
 
-      {/* Fixed, pretty bottom-right toast (never clipped by cards) */}
-      <Toast feedback={feedback} onClose={() => setFeedback(null)} />
+      {/* Toast rendered to document.body via portal so it never gets clipped */}
+      <ToastPortal>
+        <Toast feedback={feedback} onClose={() => setFeedback(null)} />
+      </ToastPortal>
     </>
   );
 }
@@ -212,6 +208,25 @@ function ConnectRow({
   );
 }
 
+/** Portal container so the toast is outside any clipping/stacking of cards */
+function ToastPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  const elRef = useRef<HTMLDivElement | null>(null);
+  if (!elRef.current) elRef.current = document.createElement("div");
+
+  useEffect(() => {
+    const el = elRef.current!;
+    document.body.appendChild(el);
+    setMounted(true);
+    return () => {
+      document.body.removeChild(el);
+    };
+  }, []);
+
+  if (!mounted) return null;
+  return createPortal(children, elRef.current!);
+}
+
 function Toast({
   feedback,
   onClose,
@@ -222,10 +237,14 @@ function Toast({
   if (!feedback) return null;
   const isSuccess = feedback.type === "success";
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-2">
+    <div
+      className="fixed bottom-5 right-5 z-50"
+      // helpful during debugging:
+      data-toast
+    >
       <div
         className={[
-          "pointer-events-auto flex items-center gap-2 rounded-xl border px-3 py-2 shadow-lg backdrop-blur",
+          "pointer-events-auto flex items-center gap-2 rounded-xl border px-3 py-2 shadow-lg backdrop-blur transition-opacity duration-200",
           isSuccess
             ? "border-green-500/30 bg-green-500/15 text-green-200"
             : "border-red-500/30 bg-red-500/15 text-red-200",
