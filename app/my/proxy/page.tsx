@@ -46,6 +46,9 @@ export default async function MyProxiesPage() {
               key={a.id}
               endpointId={a.endpointId}                   // ✅ enable Rotate button
               planName={a.plan.name}
+			  allocationId={a.id}
+              rotateUrl={a.endpoint?.controllerPath ?? undefined}
+
               days={a.plan.durationD}
               host={a.endpoint.host}
               port={a.endpoint.port}
