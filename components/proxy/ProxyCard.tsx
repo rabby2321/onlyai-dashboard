@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Clock, Copy, ShieldCheck, RotateCw, CheckCircle2, AlertTriangle } from "lucide-react";
 
 type Props = {
+  // shown fields
   planName: string;
   days: number;
   host: string;
@@ -13,13 +14,10 @@ type Props = {
   password: string;
   endsAt: string | Date;
 
-  /** Optional: preferred way (server calls vendor and checks auth) */
+  /** Preferred: server-side rotate via your API route (no CORS, no secrets leaked) */
   allocationId?: string;
 
-  /** Optional fallback: full vendor URL like:
-   *   http://192.168.12.219/selling/rotate?token=XXXX
-   * Will be fetched from the browser (may be blocked by CORS off-network).
-   */
+  /** Optional fallback: direct vendor URL (will only work if reachable+CORS allows). */
   rotateUrl?: string;
 };
 
@@ -38,7 +36,7 @@ export default function ProxyCard({
   const [rotating, setRotating] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // remove any "(xx days)" suffix if it exists in DB
+  // remove any "(xx days)" suffix if it exists in DB (kept from your original)
   const cleanName = planName.replace(/\s*\(\s*\d+\s*days?\s*\)\s*$/i, "").trim();
 
   const socks = `socks5://${encodeURIComponent(username)}:${encodeURIComponent(
@@ -53,7 +51,9 @@ export default function ProxyCard({
       await navigator.clipboard.writeText(text);
       setCopied(which);
       setTimeout(() => setCopied(null), 1200);
-    } catch {}
+    } catch {
+      /* noop */
+    }
   }
 
   function toast(type: "success" | "error", message: string) {
@@ -65,7 +65,7 @@ export default function ProxyCard({
     if (rotating) return;
     setRotating(true);
     try {
-      // Preferred: go through our server route (auth + no CORS headaches)
+      // Preferred: go through our server (auth + privacy)
       if (allocationId) {
         const r = await fetch("/api/proxy/rotate", {
           method: "POST",
@@ -73,15 +73,12 @@ export default function ProxyCard({
           body: JSON.stringify({ allocationId }),
         });
         const j = await r.json().catch(() => ({}));
-        if (r.ok && j.ok !== false) {
-          toast("success", j.message || "Rotate successfully!");
-        } else {
-          toast("error", j.error || j.message || "Rotation failed");
-        }
+        if (r.ok && j.ok !== false) toast("success", j.message || "Rotate successfully!");
+        else toast("error", j.error || j.message || "Rotation failed");
         return;
       }
 
-      // Fallback: direct vendor URL (works only if accessible & CORS allows it)
+      // Fallback: direct URL (works only if accessible & CORS allows)
       if (rotateUrl) {
         const r = await fetch(rotateUrl, { method: "GET", headers: { accept: "application/json,*/*" } });
         let msg = "Rotate successfully!";
@@ -93,16 +90,13 @@ export default function ProxyCard({
           const txt = await r.text().catch(() => "");
           if (txt) msg = txt.slice(0, 200);
         }
-        if (!r.ok) {
-          toast("error", "Rotation failed");
-        } else {
-          toast("success", msg);
-        }
+        if (!r.ok) toast("error", "Rotation failed");
+        else toast("success", msg);
         return;
       }
 
       toast("error", "Rotate not configured");
-    } catch (e) {
+    } catch {
       toast("error", "Rotation failed");
     } finally {
       setRotating(false);
@@ -133,30 +127,16 @@ export default function ProxyCard({
         </div>
       )}
 
-      {/* Header (kept your original look; added Rotate button on the right) */}
+      {/* Header (same look; no rotate button here to avoid duplication) */}
       <div className="mb-5 flex items-start justify-between">
         <div className="text-sm text-zinc-300">
-          {/* ✅ Force the display title */}
           <div className="font-medium text-white">5G Mobile Proxy</div>
           <div className="text-xs text-zinc-500">({days} days)</div>
         </div>
-
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200">
-            <ShieldCheck className="h-3 w-3" />
-            SOCKS5 &amp; HTTP(S)
-          </span>
-
-          <button
-            onClick={rotate}
-            disabled={rotating || (!allocationId && !rotateUrl)}
-            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
-            title={allocationId || rotateUrl ? "Rotate IP now" : "Rotate not configured"}
-          >
-            <RotateCw className={`h-3.5 w-3.5 ${rotating ? "animate-spin" : ""}`} />
-            {rotating ? "Rotating…" : "Rotate IP"}
-          </button>
-        </div>
+        <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200">
+          <ShieldCheck className="h-3 w-3" />
+          SOCKS5 &amp; HTTP(S)
+        </span>
       </div>
 
       {/* Fields */}
@@ -164,16 +144,26 @@ export default function ProxyCard({
         <Field label="Host" value={host} />
         <Field label="Port" value={String(port)} />
         <Field label="Username" value={username} />
-        {/* ✅ Show actual password */}
         <Field label="Password" value={password} />
       </div>
 
-      {/* Connect strings */}
+      {/* Connect strings (Rotate button lives on the first row, next to Copy) */}
       <ConnectRow
         label="Connect (SOCKS5)"
         value={socks}
         copied={copied === "socks"}
         onCopy={() => copy(socks, "socks")}
+        extra={
+          <button
+            onClick={rotate}
+            disabled={rotating || (!allocationId && !rotateUrl)}
+            title={allocationId || rotateUrl ? "Rotate IP now" : "Rotate not configured"}
+            className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/40 bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RotateCw className={`h-3.5 w-3.5 ${rotating ? "animate-spin" : ""}`} />
+            {rotating ? "Rotating…" : "Rotate IP"}
+          </button>
+        }
       />
       <ConnectRow
         label="Connect (HTTP/S)"
@@ -195,7 +185,9 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <label className="block">
       <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">{value}</div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-200">
+        {value}
+      </div>
     </label>
   );
 }
@@ -205,11 +197,14 @@ function ConnectRow({
   value,
   onCopy,
   copied,
+  extra,
 }: {
   label: string;
   value: string;
   onCopy: () => void;
   copied: boolean;
+  /** Optional right-side button (Rotate IP, etc.) */
+  extra?: React.ReactNode;
 }) {
   return (
     <div className="mt-4">
@@ -225,6 +220,7 @@ function ConnectRow({
           <Copy className="h-3.5 w-3.5" />
           {copied ? "Copied" : "Copy"}
         </button>
+        {extra}
       </div>
     </div>
   );
