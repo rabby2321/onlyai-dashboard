@@ -5,17 +5,31 @@ import { authOptions } from "@/lib/authOptions";
 import { redirect } from "next/navigation";
 import ProxyCard from "@/components/proxy/ProxyCard";
 
-
 export const dynamic = "force-dynamic";
 
 export default async function MyProxiesPage() {
   const session = await getServerSession(authOptions);
-  const userId = (session as any)?.userId;
+  const userId = (session as any)?.userId as string | undefined;
   if (!userId) redirect("/login?next=/my/proxy");
 
+  // Only fetch what the client needs — DO NOT expose controllerPath
   const allocations = await prisma.allocation.findMany({
     where: { userId },
-    include: { endpoint: true, plan: true },
+    select: {
+      id: true,
+      endsAt: true,
+      endpointId: true, // used only to call /api/proxy/rotate
+      plan: { select: { name: true, durationD: true } },
+      endpoint: {
+        select: {
+          host: true,
+          port: true,
+          authUser: true,
+          authPass: true,
+          // controllerPath is intentionally NOT selected
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -26,20 +40,21 @@ export default async function MyProxiesPage() {
       {allocations.length === 0 ? (
         <Empty />
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">  {/* was sm:2 xl:3 */}
-  {allocations.map((a) => (
-    <ProxyCard
-      key={a.id}
-      planName={a.plan.name}
-      days={a.plan.durationD}
-      host={a.endpoint.host}
-      port={a.endpoint.port}
-      username={a.endpoint.authUser}
-      password={a.endpoint.authPass}
-      endsAt={a.endsAt}
-    />
-  ))}
-</div>
+        <div className="grid gap-6 md:grid-cols-2">
+          {allocations.map((a) => (
+            <ProxyCard
+              key={a.id}
+              endpointId={a.endpointId}                   // ✅ enable Rotate button
+              planName={a.plan.name}
+              days={a.plan.durationD}
+              host={a.endpoint.host}
+              port={a.endpoint.port}
+              username={a.endpoint.authUser}
+              password={a.endpoint.authPass}
+              endsAt={a.endsAt}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
