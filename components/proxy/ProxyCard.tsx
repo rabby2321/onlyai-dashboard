@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, Copy, ShieldCheck, RotateCw, CheckCircle2, AlertTriangle, X } from "lucide-react";
+import { Clock, Copy, ShieldCheck, RotateCw, CheckCircle2, AlertTriangle } from "lucide-react";
 
 type Props = {
   endpointId?: string;
@@ -14,13 +14,10 @@ type Props = {
   password: string;
   endsAt: string | Date;
 
-  /** Optional: preferred way (server calls vendor and checks auth) */
+  /** Preferred: server route will call vendor & avoid CORS */
   allocationId?: string;
 
-  /** Optional fallback: full vendor URL like:
-   *   http://192.168.12.219/selling/rotate?token=XXXX
-   * Will be fetched from the browser (may be blocked by CORS off-network).
-   */
+  /** Fallback: direct vendor URL (may fail off-LAN / CORS) */
   rotateUrl?: string;
 };
 
@@ -37,23 +34,10 @@ export default function ProxyCard({
 }: Props) {
   const [copied, setCopied] = useState<"socks" | "http" | null>(null);
   const [rotating, setRotating] = useState(false);
-
-  // toast feedback (moved to fixed bottom-right; animated in/out)
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [toastVisible, setToastVisible] = useState(false);
 
-  useEffect(() => {
-    if (!feedback) return;
-    // animate in
-    setToastVisible(true);
-    // start auto-hide
-    const hide = setTimeout(() => setToastVisible(false), 1600);
-    const clear = setTimeout(() => setFeedback(null), 1900);
-    return () => {
-      clearTimeout(hide);
-      clearTimeout(clear);
-    };
-  }, [feedback]);
+  // remove any "(xx days)" suffix if it exists in DB
+  const cleanName = planName.replace(/\s*\(\s*\d+\s*days?\s*\)\s*$/i, "").trim();
 
   const socks = `socks5://${encodeURIComponent(username)}:${encodeURIComponent(
     password
@@ -74,11 +58,17 @@ export default function ProxyCard({
     setFeedback({ type, message });
   }
 
+  // auto-dismiss toast
+  useEffect(() => {
+    if (!feedback) return;
+    const t = setTimeout(() => setFeedback(null), 1800);
+    return () => clearTimeout(t);
+  }, [feedback]);
+
   async function rotate() {
     if (rotating) return;
     setRotating(true);
     try {
-      // Preferred: go through our server route (auth + no CORS headaches)
       if (allocationId) {
         const r = await fetch("/api/proxy/rotate", {
           method: "POST",
@@ -87,17 +77,16 @@ export default function ProxyCard({
         });
         const j = await r.json().catch(() => ({}));
         if (r.ok && j.ok !== false) {
-          toast("success", j.message || "Rotate successfully!");
+          toast("success", j.message || "Rotated successfully!");
         } else {
           toast("error", j.error || j.message || "Rotation failed");
         }
         return;
       }
 
-      // Fallback: direct vendor URL (works only if accessible & CORS allows it)
       if (rotateUrl) {
         const r = await fetch(rotateUrl, { method: "GET", headers: { accept: "application/json,*/*" } });
-        let msg = "Rotate successfully!";
+        let msg = "Rotated successfully!";
         const ct = r.headers.get("content-type") || "";
         if (ct.includes("application/json")) {
           const j = await r.json().catch(() => null);
@@ -106,11 +95,8 @@ export default function ProxyCard({
           const txt = await r.text().catch(() => "");
           if (txt) msg = txt.slice(0, 200);
         }
-        if (!r.ok) {
-          toast("error", "Rotation failed");
-        } else {
-          toast("success", msg);
-        }
+        if (!r.ok) toast("error", "Rotation failed");
+        else toast("success", msg);
         return;
       }
 
@@ -124,47 +110,10 @@ export default function ProxyCard({
 
   return (
     <>
-      {/* Toast – fixed bottom-right, subtle slide/fade, doesn’t cover the card */}
-      {feedback && (
-        <div
-          aria-live="polite"
-          className={`fixed bottom-5 right-5 z-[60] transition-all duration-300 ${
-            toastVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none"
-          }`}
-        >
-          <div
-            className={[
-              "pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur-sm",
-              feedback.type === "success"
-                ? "border-green-400/30 bg-green-500/10 text-green-200"
-                : "border-red-400/30 bg-red-500/10 text-red-200",
-            ].join(" ")}
-          >
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-5 w-5" />
-            ) : (
-              <AlertTriangle className="h-5 w-5" />
-            )}
-            <span className="text-sm font-medium">{feedback.message}</span>
-            <button
-              onClick={() => {
-                setToastVisible(false);
-                setTimeout(() => setFeedback(null), 200);
-              }}
-              className="ml-2 rounded-md p-1/2 text-inherit hover:opacity-80"
-              aria-label="Dismiss"
-              title="Dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="relative overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950 p-6 shadow-sm ring-1 ring-white/5 hover:border-zinc-700 hover:shadow-lg hover:shadow-cyan-500/5 transition">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
 
-        {/* Header (kept your original look; Rotate on the right) */}
+        {/* Header */}
         <div className="mb-5 flex items-start justify-between">
           <div className="text-sm text-zinc-300">
             <div className="font-medium text-white">5G Mobile Proxy</div>
@@ -217,6 +166,9 @@ export default function ProxyCard({
           Expires: {new Date(endsAt).toLocaleString()}
         </div>
       </div>
+
+      {/* Fixed, pretty bottom-right toast (never clipped by cards) */}
+      <Toast feedback={feedback} onClose={() => setFeedback(null)} />
     </>
   );
 }
@@ -254,6 +206,41 @@ function ConnectRow({
         >
           <Copy className="h-3.5 w-3.5" />
           {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Toast({
+  feedback,
+  onClose,
+}: {
+  feedback: { type: "success" | "error"; message: string } | null;
+  onClose: () => void;
+}) {
+  if (!feedback) return null;
+  const isSuccess = feedback.type === "success";
+  return (
+    <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-2">
+      <div
+        className={[
+          "pointer-events-auto flex items-center gap-2 rounded-xl border px-3 py-2 shadow-lg backdrop-blur",
+          isSuccess
+            ? "border-green-500/30 bg-green-500/15 text-green-200"
+            : "border-red-500/30 bg-red-500/15 text-red-200",
+        ].join(" ")}
+        role="status"
+        aria-live="polite"
+      >
+        {isSuccess ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+        <span className="text-sm">{feedback.message}</span>
+        <button
+          onClick={onClose}
+          className="ml-1 rounded px-1 text-xs text-white/70 hover:text-white/90"
+          aria-label="Close"
+        >
+          ×
         </button>
       </div>
     </div>
